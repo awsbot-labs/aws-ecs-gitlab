@@ -1,4 +1,8 @@
 DATE = $(shell date)
+PHONY: test
+
+test:
+	./test
 
 release:
 	@echo "Enter commit message:"
