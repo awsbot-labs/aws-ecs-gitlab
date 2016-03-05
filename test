@@ -4,3 +4,44 @@
 
 # Test for aws command
 which aws
+
+export STACK_NAME=$RECORD_SET-`echo $DOMAIN_NAME | sed -e 's/\./\-/g'`
+export VERSION=`cat VERSION`
+export ROOT_URL=$DOMAIN_NAME/index.html
+
+function abort()
+{
+  echo " *** ERROR $@"
+  exit 1
+}
+
+function cleanup()
+{
+  echo " --> Cleaning up"
+
+  echo " --> Deleting CloudFormation stack"
+  aws cloudformation delete-stack --stack-name $STACK_NAME > /dev/null 2>&1
+  echo "Finished at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
+}
+
+echo "Started at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
+trap cleanup EXIT
+
+echo " --> Creating Cloudformation stack"
+aws cloudformation create-stack \
+  --stack-name $STACK_NAME \
+  --template-body file://cloudformation.json \
+  --capabilities CAPABILITY_IAM \
+  --output text \
+  --parameters ParameterKey=DomainName,ParameterValue=$DOMAIN_NAME \
+ParameterKey=RecordSet,ParameterValue=$RECORD_SET > /dev/null 2>&1
+
+echo " --> Watching stack progress, please wait..."
+STACK_STATUS=CREATE_IN_PROGRESS
+while [ "$STACK_STATUS" == "CREATE_IN_PROGRESS" ]; do
+  STACK_STATUS=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query Stacks[*].StackStatus --output text`
+  if [[ ( "$STACK_STATUS" == "CREATE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_FAILED" ) ]]; then
+    break
+  fi
+  sleep 3
+done
