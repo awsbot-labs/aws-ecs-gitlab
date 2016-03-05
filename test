@@ -1,2 +1,2 @@
 #!/bin/bash -ex
-which aws > /dev/null
+which aws
