@@ -9,7 +9,7 @@ trap cleanup EXIT
 # Test for prerquistes
 test_prerequisites
 # Create the stack
-create_stack
+create_stack $STACK_NAME
 # Watch stack progress
 watch_stack_progress
 # Get the web endpoint

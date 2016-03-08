@@ -28,7 +28,7 @@ function create_stack()
   echo " --> Creating Cloudformation stack"
   # Creates a CloudFormation stack for the ECS cluster
   aws cloudformation create-stack \
-    --stack-name $STACK_NAME \
+    --stack-name $1 \
     --template-body file://cloudformation.json \
     --capabilities CAPABILITY_IAM \
     --notification-arns "$NOTIFICATION_TOPIC_ARN" \
