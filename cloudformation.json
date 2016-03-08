@@ -1,0 +1,843 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Creates the Gitlab application.",
+    "Parameters": {
+        "DBPassword": {
+            "NoEcho": "true",
+            "Description": "Password for MySQL database access",
+            "Type": "String",
+            "MinLength": "8",
+            "MaxLength": "41",
+            "AllowedPattern": "[a-zA-Z0-9]*",
+            "ConstraintDescription": "must contain only alphanumeric characters."
+        },
+        "DBAllocatedStorage": {
+            "Default": "5",
+            "Description": "The size of the database (Gb)",
+            "Type": "Number",
+            "MinValue": "5",
+            "MaxValue": "1024",
+            "ConstraintDescription": "must be between 5 and 1024Gb."
+        },
+        "DBInstanceClass": {
+            "Description": "The database instance type",
+            "Type": "String",
+            "Default": "db.t2.micro",
+            "AllowedValues": [
+                "db.t2.micro",
+                "db.m1.small",
+                "db.m1.medium",
+                "db.m1.large",
+                "db.m1.xlarge",
+                "db.m2.xlarge",
+                "db.m2.2xlarge",
+                "db.m2.4xlarge",
+                "db.m3.medium",
+                "db.m3.large",
+                "db.m3.xlarge",
+                "db.m3.2xlarge",
+                "db.r3.large",
+                "db.r3.xlarge",
+                "db.r3.2xlarge",
+                "db.r3.4xlarge",
+                "db.r3.8xlarge",
+                "db.m2.xlarge",
+                "db.m2.2xlarge",
+                "db.m2.4xlarge",
+                "db.cr1.8xlarge"
+            ],
+            "ConstraintDescription": "must select a valid database instance type."
+        },
+        "KeyName": {
+            "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+            "Default": "gitlab",
+            "Type": "AWS::EC2::KeyPair::KeyName",
+            "MinLength": "1",
+            "MaxLength": "64",
+            "AllowedPattern": "[-_ a-zA-Z0-9]*",
+            "ConstraintDescription": "can contain only alphanumeric characters, spaces, dashes and underscores."
+        },
+        "DNSDomain": {
+            "Description": "DNS Name for the Application",
+            "Type": "String",
+            "Default": "awsbot.com"
+        },
+        "DockerImage": {
+            "Default": "gitlab/gitlab-ce",
+            "Description": "A docker image to for the task definition.",
+            "Type": "String"
+        },
+        "NotificationTopicArn": {
+            "Description": "Topic to send AutoScaling Notifications to.",
+            "Type": "String"
+        },
+        "SSHLocation": {
+            "Description": " The IP address range that can be used to SSH to the EC2 instances",
+            "Type": "String",
+            "MinLength": "9",
+            "MaxLength": "18",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "SSLCertificateId": {
+            "Description": "The ARN of the SSL certificate.",
+            "Type": "String"
+        }
+    },
+    "Conditions": {
+        "Is-EC2-VPC": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "eu-central-1"
+                    ]
+                },
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "cn-north-1"
+                    ]
+                }
+            ]
+        },
+        "Is-EC2-Classic": {
+            "Fn::Not": [
+                {
+                    "Condition": "Is-EC2-VPC"
+                }
+            ]
+        }
+    },
+    "Mappings": {
+        "AWSRegion2AMI": {
+            "us-east-1": {
+                "ecs": "ami-4fe4852a"
+            },
+            "us-west-2": {
+                "ecs": "ami-8bd4c7bb"
+            },
+            "eu-west-1": {
+                "ecs": "ami-7948320e"
+            },
+            "ap-northeast-1": {
+                "ecs": "ami-ce2ba4ce"
+            },
+            "ap-southeast-2": {
+                "ecs": "ami-3f531f05"
+            }
+        }
+    },
+    "Resources": {
+        "ECSServiceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ecs.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "gitlab-ecs-service",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "elasticloadbalancing:Describe*",
+                                        "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                                        "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                                        "ec2:Describe*",
+                                        "ec2:AuthorizeSecurityGroupIngress"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "EC2InstanceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ec2.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "gitlab-ec2-instance-policy",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ecs:CreateCluster",
+                                        "ecs:RegisterContainerInstance",
+                                        "ecs:DeregisterContainerInstance",
+                                        "ecs:DiscoverPollEndpoint",
+                                        "ecs:Submit*",
+                                        "ecs:Poll"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "IamPolicy": {
+            "Type": "AWS::IAM::Policy",
+            "DependsOn": "EC2InstanceRole",
+            "Properties": {
+                "PolicyName": "gitlab-iam-policy",
+                "PolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ecs:CreateCluster",
+                                "ecs:DeregisterContainerInstance",
+                                "ecs:DiscoverPollEndpoint",
+                                "ecs:Poll",
+                                "ecs:RegisterContainerInstance",
+                                "ecs:Submit*"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:*",
+                                "elasticloadbalancing:Describe*",
+                                "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                                "elasticloadbalancing:RegisterInstancesWithLoadBalancer"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                },
+                "Roles": [
+                    {
+                        "Ref": "EC2InstanceRole"
+                    }
+                ]
+            }
+        },
+        "IamInstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "DependsOn": "EC2InstanceRole",
+            "Properties": {
+                "Path": "/",
+                "Roles": [
+                    {
+                        "Ref": "EC2InstanceRole"
+                    }
+                ]
+            }
+        },
+        "AutoScalingSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Enable SSH access",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "SourceSecurityGroupOwnerId": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.OwnerAlias"
+                            ]
+                        },
+                        "SourceSecurityGroupName": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.GroupName"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "443",
+                        "ToPort": "443",
+                        "SourceSecurityGroupOwnerId": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.OwnerAlias"
+                            ]
+                        },
+                        "SourceSecurityGroupName": {
+                            "Fn::GetAtt": [
+                                "ElasticLoadBalancer",
+                                "SourceSecurityGroup.GroupName"
+                            ]
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "443",
+                        "ToPort": "443",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    }
+                ]
+            }
+        },
+        "AutoScalingGroup": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "UpdatePolicy": {
+                "AutoScalingRollingUpdate": {
+                    "MaxBatchSize": "1",
+                    "MinInstancesInService": "1",
+                    "PauseTime": "PT2M30S"
+                }
+            },
+            "CreationPolicy": {
+                "ResourceSignal": {
+                    "Count": "1",
+                    "Timeout": "PT15M"
+                }
+            },
+            "Properties": {
+                "AvailabilityZones": {
+                    "Fn::GetAZs": ""
+                },
+                "LaunchConfigurationName": {
+                    "Ref": "AutoScalingLaunchConfig"
+                },
+                "LoadBalancerNames": [
+                    {
+                        "Ref": "ElasticLoadBalancer"
+                    }
+                ],
+                "MinSize": "1",
+                "MaxSize": "3",
+                "DesiredCapacity": "1",
+                "NotificationConfiguration": {
+                    "TopicARN": {
+                      "Ref": "NotificationTopicArn"
+                    },
+                    "NotificationTypes": [
+                        "autoscaling:EC2_INSTANCE_LAUNCH",
+                        "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
+                        "autoscaling:EC2_INSTANCE_TERMINATE",
+                        "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"
+                    ]
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "gitlab.",
+                                    {
+                                        "Ref": "DNSDomain"
+                                    }
+                                ]
+                            ]
+                        },
+                        "PropagateAtLaunch": "true"
+                    }
+                ]
+            }
+        },
+        "AutoScalingLaunchConfig": {
+            "DependsOn": "ECSCluster",
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Metadata": {
+                "AWS::CloudFormation::Init": {
+                    "configSets": {
+                        "full_install": [
+                            "install_cfn",
+                            "configure_ecs",
+                            "configure_gitlab"
+                        ]
+                    },
+                    "install_cfn": {
+                        "files": {
+                            "/etc/cfn/cfn-hup.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "interval=1\n",
+                                            "stack=",
+                                            {
+                                                "Ref": "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000400",
+                                "owner": "root",
+                                "group": "root"
+                            },
+                            "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.AutoScalingLaunchConfig.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=/opt/aws/bin/cfn-init -v ",
+                                            "         --stack ",
+                                            {
+                                                "Ref": "AWS::StackName"
+                                            },
+                                            "         --resource AutoScalingLaunchConfig ",
+                                            "         --configsets full_install ",
+                                            "         --region ",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            "\n",
+                                            "runas=root\n"
+                                        ]
+                                    ]
+                                }
+                            }
+                        },
+                        "services": {
+                            "sysvinit": {
+                                "cfn-hup": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true",
+                                    "files": [
+                                        "/etc/cfn/cfn-hup.conf",
+                                        "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "configure_ecs": {
+                        "files": {
+                            "/etc/ecs/ecs.config": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "ECS_CLUSTER=",
+                                            {
+                                                "Ref": "ECSCluster"
+                                            },
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000644",
+                                "owner": "root",
+                                "group": "root"
+                            }
+                        }
+                    },
+                    "configure_gitlab": {
+                        "files": {
+                            "/srv/gitlab/config/gitlab.rb": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "gitlab_rails['db_password'] = \"",
+                                            {
+                                                "Ref": "DBPassword"
+                                            },
+                                            "\"\n",
+                                            "gitlab_rails['db_host'] = \"",
+                                            {
+                                                "Fn::GetAtt": [
+                                                    "PostgresDatabase",
+                                                    "Endpoint.Address"
+                                                ]
+                                            },
+                                            "\"\n",
+                                            "nginx['listen_port'] = 80\n",
+                                            "nginx['listen_https'] = false\n",
+                                            "nginx['proxy_set_headers'] = {\n",
+                                            "  \"X-Forwarded-Proto\" => \"https\",\n",
+                                            "  \"X-Forwarded-Ssl\" => \"on\"\n",
+                                            "}\n"
+                                        ]
+                                    ]
+                                },
+                                "mode": "000644",
+                                "owner": "root",
+                                "group": "root"
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSRegion2AMI",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "ecs"
+                    ]
+                },
+                "InstanceType": "t2.medium",
+                "IamInstanceProfile": {
+                    "Ref": "IamInstanceProfile"
+                },
+                "SecurityGroups": [
+                    {
+                        "Ref": "AutoScalingSecurityGroup"
+                    }
+                ],
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "echo ECS_CLUSTER=",
+                                {
+                                    "Ref": "ECSCluster"
+                                },
+                                " > /etc/ecs/ecs.config\n",
+                                "yum install -y aws-cfn-bootstrap aws-cli vim wget\n",
+                                "/opt/aws/bin/cfn-init -v",
+                                " --stack ",
+                                {
+                                    "Ref": "AWS::StackId"
+                                },
+                                " --resource AutoScalingLaunchConfig",
+                                " --configsets full_install",
+                                " --region ",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                " && ",
+                                "/opt/aws/bin/cfn-signal -e $?",
+                                " --stack ",
+                                {
+                                    "Ref": "AWS::StackId"
+                                },
+                                " --resource AutoScalingGroup ",
+                                " --region ",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                "\n"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "ElasticLoadBalancer": {
+            "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+            "Properties": {
+                "AvailabilityZones" : { "Fn::GetAZs" : { "Ref" : "AWS::Region" } },
+                "HealthCheck": {
+                    "HealthyThreshold": "2",
+                    "Interval": "6",
+                    "Target": "HTTP:80/users/sign_in",
+                    "Timeout": "3",
+                    "UnhealthyThreshold": "3"
+                },
+                "CrossZone": "true",
+                "Listeners": [
+                  {
+                      "InstancePort": "80",
+                      "InstanceProtocol": "HTTP",
+                      "LoadBalancerPort": "443",
+                      "Protocol": "HTTPS",
+                      "SSLCertificateId": {
+                          "Ref": "SSLCertificateId"
+                      }
+                  }
+                ]
+            }
+        },
+        "ECSCluster": {
+            "Type": "AWS::ECS::Cluster"
+        },
+        "ECSTaskDefinition": {
+            "Type": "AWS::ECS::TaskDefinition",
+            "Properties": {
+                "ContainerDefinitions": [
+                    {
+                        "Name": "gitlab",
+                        "Image": {
+                            "Ref": "DockerImage"
+                        },
+                        "Essential": "true",
+                        "Cpu": "2048",
+                        "Memory": "2048",
+                        "PortMappings": [
+                            {
+                                "ContainerPort": "80",
+                                "HostPort": "80"
+                            },
+                            {
+                                "ContainerPort": "443",
+                                "HostPort": "443"
+                            }
+                        ],
+                        "MountPoints": [
+                            {
+                                "ContainerPath": "/etc/gitlab",
+                                "SourceVolume": "gitlab-config"
+                            },
+                            {
+                                "ContainerPath": "/var/log/gitlab",
+                                "SourceVolume": "gitlab-logs"
+                            },
+                            {
+                                "ContainerPath": "/var/opt/gitlab",
+                                "SourceVolume": "gitlab-data"
+                            }
+                        ]
+                    }
+                ],
+                "Volumes": [
+                    {
+                        "Name": "gitlab-config",
+                        "Host": {
+                            "SourcePath": "/srv/gitlab/config"
+                        }
+                    },
+                    {
+                        "Name": "gitlab-logs",
+                        "Host": {
+                            "SourcePath": "/srv/gitlab/logs"
+                        }
+                    },
+                    {
+                        "Name": "gitlab-data",
+                        "Host": {
+                            "SourcePath": "/srv/gitlab/data"
+                        }
+                    }
+                ]
+            }
+        },
+        "ECSServiceDefinition": {
+            "DependsOn": "AutoScalingGroup",
+            "Type": "AWS::ECS::Service",
+            "Properties": {
+                "Cluster": {
+                    "Ref": "ECSCluster"
+                },
+                "DesiredCount": "1",
+                "LoadBalancers": [
+                    {
+                        "ContainerName": "gitlab",
+                        "ContainerPort": "80",
+                        "LoadBalancerName": {
+                            "Ref": "ElasticLoadBalancer"
+                        }
+                    }
+                ],
+                "Role": {
+                    "Ref": "ECSServiceRole"
+                },
+                "TaskDefinition": {
+                    "Ref": "ECSTaskDefinition"
+                }
+            }
+        },
+        "RecordSetGroup": {
+            "Type": "AWS::Route53::RecordSetGroup",
+            "Properties": {
+                "HostedZoneName": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            {
+                                "Ref": "DNSDomain"
+                            },
+                            "."
+                        ]
+                    ]
+                },
+                "Comment": "The Gitlab HTTP application",
+                "RecordSets": [
+                    {
+                        "Name": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "gitlab.",
+                                    {
+                                        "Ref": "DNSDomain"
+                                    },
+                                    "."
+                                ]
+                            ]
+                        },
+                        "Type": "A",
+                        "AliasTarget": {
+                            "DNSName": {
+                                "Fn::GetAtt": [
+                                    "ElasticLoadBalancer",
+                                    "DNSName"
+                                ]
+                            },
+                            "EvaluateTargetHealth": "true",
+                            "HostedZoneId": {
+                                "Fn::GetAtt": [
+                                    "ElasticLoadBalancer",
+                                    "CanonicalHostedZoneNameID"
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "DBEC2SecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Condition": "Is-EC2-VPC",
+            "Properties": {
+                "GroupDescription": "Open database for access",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "5432",
+                        "ToPort": "5432",
+                        "SourceSecurityGroupName": {
+                            "Ref": "AutoScalingSecurityGroup"
+                        }
+                    }
+                ]
+            }
+        },
+        "DBSecurityGroup": {
+            "Type": "AWS::RDS::DBSecurityGroup",
+            "Condition": "Is-EC2-Classic",
+            "Properties": {
+                "DBSecurityGroupIngress": {
+                    "EC2SecurityGroupName": {
+                        "Ref": "AutoScalingSecurityGroup"
+                    }
+                },
+                "GroupDescription": "database access"
+            }
+        },
+        "PostgresDatabase": {
+            "Type": "AWS::RDS::DBInstance",
+            "Properties": {
+                "Engine": "postgres",
+                "DBName": "gitlabhq_production",
+                "MultiAZ": "true",
+                "MasterUsername": "gitlab",
+                "MasterUserPassword": {
+                    "Ref": "DBPassword"
+                },
+                "DBInstanceClass": {
+                    "Ref": "DBInstanceClass"
+                },
+                "AllocatedStorage": {
+                    "Ref": "DBAllocatedStorage"
+                },
+                "VPCSecurityGroups": {
+                    "Fn::If": [
+                        "Is-EC2-VPC",
+                        [
+                            {
+                                "Fn::GetAtt": [
+                                    "DBEC2SecurityGroup",
+                                    "GroupId"
+                                ]
+                            }
+                        ],
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "DBSecurityGroups": {
+                    "Fn::If": [
+                        "Is-EC2-Classic",
+                        [
+                            {
+                                "Ref": "DBSecurityGroup"
+                            }
+                        ],
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "LoadbalancerEndpoint": {
+            "Description": "The DNS Name of the load balancer",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ElasticLoadBalancer",
+                    "DNSName"
+                ]
+            }
+        }
+    }
+}

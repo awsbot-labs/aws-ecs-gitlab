@@ -1,0 +1,90 @@
+#!/bin/bash -xe
+# -x  Print commands and their arguments as they are executed.
+# -e  Exit immediately if a command exits with a non-zero status.
+
+function abort()
+{
+  echo " *** ERROR $@"
+  exit 1
+}
+
+function cleanup()
+{
+  echo " --> Cleaning up"
+
+  echo " --> Deleting CloudFormation stack"
+  aws cloudformation delete-stack --stack-name $STACK_NAME
+  echo "Finished at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
+}
+
+function configure_awscli()
+{
+  # Configures the aws-cli, requires an access key is and secret
+  aws configure --profile $AWS_DEFAULT_PROFILE
+}
+
+function create_stack()
+{
+  echo " --> Creating Cloudformation stack"
+  # Creates a CloudFormation stack for the ECS cluster
+  aws cloudformation create-stack \
+    --stack-name $STACK_NAME \
+    --template-body file://cloudformation.json \
+    --capabilities CAPABILITY_IAM \
+    --notification-arns "$NOTIFICATION_TOPIC_ARN" \
+    --parameters ParameterKey=SSHLocation,ParameterValue="$IPADDRESS/32" \
+ParameterKey=DNSDomain,ParameterValue="$DNS_DOMAIN_NAME" \
+ParameterKey=SSLCertificateId,ParameterValue="$SSL_CERTIFICATE_ID" \
+ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
+ParameterKey=NotificationTopicArn,ParameterValue="$NOTIFICATION_TOPIC_ARN" > /dev/null 2>&1
+}
+
+function get_url()
+{
+  ENDPOINT=https://gitlab.$DNS_DOMAIN_NAME/users/sign_in
+  echo " --> Testing endpoint $ENDPOINT"
+  curl -k -s $ENDPOINT
+}
+
+function set_stack_name()
+{
+  # Set stackname
+  if [ -e $DNS_DOMAIN_NAME ]; then
+    echo " --> Setting stackname to gitlab-$DNS_DOMAIN_NAME"
+    export STACK_NAME=gitlab-`echo $DNS_DOMAIN_NAME | sed -e 's/\./\-/g'`
+  fi
+}
+
+function source_envs()
+{
+  # Source Environment variables if present
+  if [ -e "environment.variables" ]; then
+    echo " --> Sourcing environment variables"
+    source environment.variables
+  fi
+
+  export VERSION=`cat VERSION`
+  export IPADDRESS=`curl -s http://whatismijnip.nl |cut -d " " -f 5`
+}
+
+function test_prerequisites()
+{
+  echo " --> Testing for awscli"
+  which aws > /dev/null 2>&1
+}
+
+function watch_stack_progress()
+{
+  echo " --> Watching stack progress, please wait..."
+  STACK_STATUS=CREATE_IN_PROGRESS
+  while [ "$STACK_STATUS" == "CREATE_IN_PROGRESS" ]; do
+    STACK_STATUS=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query Stacks[*].StackStatus --output text`
+    if [[ ( "$STACK_STATUS" == "CREATE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_FAILED" ) ]]; then
+      break
+    fi
+    sleep 3
+  done
+}
+
+# Source common environment variables
+source_envs

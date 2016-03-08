@@ -1,47 +1,25 @@
 #!/bin/bash -xe
 # -x  Print commands and their arguments as they are executed.
 # -e  Exit immediately if a command exits with a non-zero status.
-
-# Test for aws command
-which aws
-
-export STACK_NAME=$RECORD_SET-`echo $DOMAIN_NAME | sed -e 's/\./\-/g'`
-export VERSION=`cat VERSION`
-export ROOT_URL=$DOMAIN_NAME/index.html
-
-function abort()
-{
-  echo " *** ERROR $@"
-  exit 1
-}
-
-function cleanup()
-{
-  echo " --> Cleaning up"
-
-  echo " --> Deleting CloudFormation stack"
-  aws cloudformation delete-stack --stack-name $STACK_NAME > /dev/null 2>&1
-  echo "Finished at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
-}
-
 echo "Started at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
+# Source the common script functions source Environment variables if present
+source functions
+# Set the trap and the exit
 trap cleanup EXIT
-
-echo " --> Creating Cloudformation stack"
-aws cloudformation create-stack \
-  --stack-name $STACK_NAME \
-  --template-body file://cloudformation.json \
-  --capabilities CAPABILITY_IAM \
-  --output text \
-  --parameters ParameterKey=DomainName,ParameterValue=$DOMAIN_NAME \
-ParameterKey=RecordSet,ParameterValue=$RECORD_SET > /dev/null 2>&1
-
-echo " --> Watching stack progress, please wait..."
-STACK_STATUS=CREATE_IN_PROGRESS
-while [ "$STACK_STATUS" == "CREATE_IN_PROGRESS" ]; do
-  STACK_STATUS=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query Stacks[*].StackStatus --output text`
-  if [[ ( "$STACK_STATUS" == "CREATE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_FAILED" ) ]]; then
-    break
-  fi
-  sleep 3
+# Test for prerquistes
+test_prerequisites
+# Create the stack
+create_stack
+# Watch stack progress
+watch_stack_progress
+# Get the web endpoint
+TIMEOUT=30
+HTTP_CODE=500
+i=0
+while [ $i -lt $TIMEOUT -a $HTTP_CODE -gt 200 ]; do
+  i=$[$i+1]
+  HTTP_CODE=`curl -o /dev/null --silent --head --write-out '%{http_code}\n' https://gitlab.$DNS_DOMAIN_NAME`
+  sleep 60
 done
+
+

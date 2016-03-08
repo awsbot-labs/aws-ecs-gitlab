@@ -1,0 +1,6 @@
+.DS_Store
+environment.variables
+*.csr
+*.pem
+*.key
+*.crt

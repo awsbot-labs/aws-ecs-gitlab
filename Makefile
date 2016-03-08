@@ -1,8 +1,14 @@
 DATE = $(shell date)
-PHONY: test
+.PHONY: install clean test cert
+
+install:
+	@bash ./install
+
+clean:
+	@bash ./clean
 
 test:
-	./test
+	@bash ./test
 
 release:
 	@echo "Enter commit message:"
