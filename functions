@@ -13,7 +13,6 @@ function abort()
 function cleanup()
 {
   echo " --> Cleaning up"
-
   echo " --> Deleting CloudFormation stack"
   aws cloudformation delete-stack --stack-name $STACK_NAME
   echo "Finished at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
@@ -31,8 +30,6 @@ function configure_awscli()
 function create_stack()
 {
   echo " --> Creating Cloudformation stack"
-  export STACK_NAME=$HOST-`echo $DNS_DOMAIN | sed -e 's/\./\-/g'`
-
   # Creates a CloudFormation stack for the ECS cluster
   aws cloudformation create-stack \
     --stack-name $STACK_NAME \
@@ -91,11 +88,11 @@ function test_endpoint()
   HOSTNAME=$HOST.$DNS_DOMAIN
   PROTOCOL=${PROTOCOL:-https}
   URL=$PROTOCOL://$HOSTNAME
-  echo " --> Testing for $URL"
+  echo " --> Testing for endpoint"
   # Number of requests
   TIMEOUT=30
   # Time to wait between requests
-  SLEEP=1
+  SLEEP=60
   # Initial HTTP code, should not be 200
   HTTP_CODE=500
   while [ $TIMEOUT -gt 0 -a $HTTP_CODE -ne 200 ]; do
@@ -104,15 +101,15 @@ function test_endpoint()
     if [ $HTTP_CODE == 200 ]; then 
       break 
     fi
-    echo " --> GET $URL http_code:$HTTP_CODE ($[TIMEOUT-i] remaining) "
+    #echo " --> GET $URL http_code:$HTTP_CODE ($[TIMEOUT-i] remaining) "
     sleep $SLEEP
   done
 
   if [ $HTTP_CODE == 200 ]; then 
-    echo " --> GET $URL was successful"
+    echo " --> Connection to endpoint was successful"
     exit 0
   else
-    echo " --> All requests to $URL failed, aborting"
+    echo " --> All requests to endpoint failed, aborting"
     exit 1
   fi
 }
