@@ -3,4 +3,4 @@ sudo: required
 before_install:
   - sudo apt-get install python-pip
   - sudo pip install awscli
-install: travis_wait 30 test
+install: travis_wait 30 bash ./test
