@@ -1,12 +1,28 @@
 #!/bin/bash
-# export AWS_SECRET_ACCESS_KEY=
-# export AWS_ACCESS_KEY_ID=
-# export AWS_DEFAULT_REGION=
-# export NOTIFICATION_TOPIC_ARN
-# export DNS_DOMAIN_NAME=
-# export DB_PASSWORD=
-# export KEY_NAME=
-# export DB_ALLOCATED_STORAGE=
-# export DOCKER_IMAGE=
-# export SSH_LOCATION=
-# export SSL_CERTIFICATE_ID=
+# The uncommented variables 
+# are the bare minimum required to deploy this CF template
+
+# AWS Keys and Region
+export AWS_ACCESS_KEY_ID=
+export AWS_SECRET_ACCESS_KEY=
+export AWS_DEFAULT_REGION=
+
+# DNS Domain name which is also used as the Stack name
+export HOST=gitlab
+export DNS_DOMAIN=
+export STACK_NAME=$HOST-`echo $DNS_DOMAIN | sed -e 's/\./\-/g'`
+
+# DB password and LoadBalancer SSL certificate
+export DB_PASSWORD=
+export SSL_CERTIFICATE_ID=
+
+# Notification Topics for the ASG and CF events
+# Note that you could always set them to the same topic
+export NOTIFICATION_TOPIC_ARN=
+export CF_NOTIFICATION_TOPIC_ARN=
+
+# These variables can be left but this does 
+# require an SSH KeyName called "gitlab"
+# export KEYNAME=gitlab
+# export DBALLOCATEDSTORAGE=5
+# export DOCKERIMAGE=gitlab/gitlab-ce

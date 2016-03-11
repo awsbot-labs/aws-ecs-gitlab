@@ -1,7 +1,7 @@
-#!/bin/bash -xe
-# -x  Print commands and their arguments as they are executed.
-# -e  Exit immediately if a command exits with a non-zero status.
+#!/bin/bash
+
 # Source common functions between scripts and environment variables
 source functions
+
 # Cleanup the stack i.e. delete it
 cleanup

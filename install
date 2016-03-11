@@ -1,8 +1,8 @@
-#!/bin/bash -xe
-# -x  Print commands and their arguments as they are executed.
-# -e  Exit immediately if a command exits with a non-zero status.
+#!/bin/bash
+
 # Source common functions between scripts and environment variables
 source functions
-# Create the cloudformation stack
+
+# Create the cloudformation and watch progress
 create_stack
 watch_stack_progress

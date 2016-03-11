@@ -1,25 +1,15 @@
-#!/bin/bash -xe
-# -x  Print commands and their arguments as they are executed.
-# -e  Exit immediately if a command exits with a non-zero status.
+#!/bin/bash
 echo "Started at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
-# Source the common script functions source Environment variables if present
+# Source the common script functions and Environment variables if present
 source functions
-# Set the trap and the exit
+# Set the trap and catch SIGNAL
+# See http://tldp.org/LDP/Bash-Beginners-Guide/html/sect_12_02.html
 trap cleanup EXIT
-# Test for prerquistes
+# Test for prerequisites
 test_prerequisites
-# Create the stack
-create_stack $STACK_NAME
-# Watch stack progress
+# Create the stack in AWS
+create_stack
+# Watch Cloudformation stack progress 
 watch_stack_progress
-# Get the web endpoint
-TIMEOUT=30
-HTTP_CODE=500
-i=0
-while [ $i -lt $TIMEOUT -a $HTTP_CODE -gt 200 ]; do
-  i=$[$i+1]
-  HTTP_CODE=`curl -o /dev/null --silent --head --write-out '%{http_code}\n' https://gitlab.$DNS_DOMAIN_NAME`
-  sleep 60
-done
-
-
+# Test endpoint for simple sanity check
+test_endpoint

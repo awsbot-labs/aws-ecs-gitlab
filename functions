@@ -1,13 +1,15 @@
-#!/bin/bash -xe
-# -x  Print commands and their arguments as they are executed.
-# -e  Exit immediately if a command exits with a non-zero status.
+#!/bin/bash
 
+# Abort with exit and message
+# Used for testing
 function abort()
 {
   echo " *** ERROR $@"
   exit 1
 }
 
+# Delete the stack
+# Used for testing and cleaning
 function cleanup()
 {
   echo " --> Cleaning up"
@@ -17,44 +19,33 @@ function cleanup()
   echo "Finished at $(date -u +%Y-%m-%dT%H:%M:%S%z)"
 }
 
+# Configure the awscli
 function configure_awscli()
 {
   # Configures the aws-cli, requires an access key is and secret
   aws configure --profile $AWS_DEFAULT_PROFILE
 }
 
+# Create the stack in Cloudformation
+# - not generic, yet.
 function create_stack()
 {
   echo " --> Creating Cloudformation stack"
   # Creates a CloudFormation stack for the ECS cluster
   aws cloudformation create-stack \
-    --stack-name $1 \
+    --stack-name $STACK_NAME \
     --template-body file://cloudformation.json \
     --capabilities CAPABILITY_IAM \
-    --notification-arns "$NOTIFICATION_TOPIC_ARN" \
+    --notification-arns "$CF_NOTIFICATION_TOPIC_ARN" \
     --parameters ParameterKey=SSHLocation,ParameterValue="$IPADDRESS/32" \
-ParameterKey=DNSDomain,ParameterValue="$DNS_DOMAIN_NAME" \
+ParameterKey=DNSDomain,ParameterValue="$DNS_DOMAIN" \
 ParameterKey=SSLCertificateId,ParameterValue="$SSL_CERTIFICATE_ID" \
 ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
-ParameterKey=NotificationTopicArn,ParameterValue="$NOTIFICATION_TOPIC_ARN" > /dev/null 2>&1
+ParameterKey=NotificationTopicArn,ParameterValue="$NOTIFICATION_TOPIC_ARN" > /dev/null
 }
 
-function get_url()
-{
-  ENDPOINT=https://gitlab.$DNS_DOMAIN_NAME/users/sign_in
-  echo " --> Testing endpoint $ENDPOINT"
-  curl -k -s $ENDPOINT
-}
-
-function set_stack_name()
-{
-  # Set stackname
-  if [ -e $DNS_DOMAIN_NAME ]; then
-    echo " --> Setting stackname to gitlab-$DNS_DOMAIN_NAME"
-    export STACK_NAME=gitlab-`echo $DNS_DOMAIN_NAME | sed -e 's/\./\-/g'`
-  fi
-}
-
+# Source the environment.variables 
+# See environment.variables.example
 function source_envs()
 {
   # Source Environment variables if present
@@ -67,12 +58,17 @@ function source_envs()
   export IPADDRESS=`curl -s http://whatismijnip.nl |cut -d " " -f 5`
 }
 
+# Test for aws and cURL
 function test_prerequisites()
 {
   echo " --> Testing for awscli"
   which aws > /dev/null 2>&1
+  echo " --> Testing for cURL"
+  which curl > /dev/null 2>&1
 }
 
+# Function to query Amazon for the CF stack progress
+# Exits when complete or delete/delete-failed
 function watch_stack_progress()
 {
   echo " --> Watching stack progress, please wait..."
@@ -86,5 +82,38 @@ function watch_stack_progress()
   done
 }
 
-# Source common environment variables
+# Test for endpoint 
+# Requires the $HOST and $DNS_DOMAIN variables to be set
+function test_endpoint()
+{
+  HOSTNAME=$HOST.$DNS_DOMAIN
+  PROTOCOL=${PROTOCOL:-https}
+  URL=$PROTOCOL://$HOSTNAME
+  echo " --> Testing for $URL"
+  # Number of requests
+  TIMEOUT=30
+  # Time to wait between requests
+  SLEEP=1
+  # Initial HTTP code, should not be 200
+  HTTP_CODE=500
+  while [ $TIMEOUT -gt 0 -a $HTTP_CODE -ne 200 ]; do
+    TIMEOUT=$[$TIMEOUT-1]
+    HTTP_CODE=`curl -o /dev/null --silent --head --write-out '%{http_code}\n' $URL`
+    if [ $HTTP_CODE == 200 ]; then 
+      break 
+    fi
+    echo " --> GET $URL http_code:$HTTP_CODE ($[TIMEOUT-i] remaining) "
+    sleep $SLEEP
+  done
+
+  if [ $HTTP_CODE == 200 ]; then 
+    echo " --> GET $URL was successful"
+    exit 0
+  else
+    echo " --> All requests to $URL failed, aborting"
+    exit 1
+  fi
+}
+
+# Initialise by sourcing environment variables
 source_envs
