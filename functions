@@ -72,12 +72,16 @@ function watch_stack_progress()
 {
   echo " --> Watching stack progress, please wait..."
   STACK_STATUS=CREATE_IN_PROGRESS
+  SLEEP=60
+  n=0
   while [ "$STACK_STATUS" == "CREATE_IN_PROGRESS" ]; do
     STACK_STATUS=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query Stacks[*].StackStatus --output text`
+    n=$[n+1]
+    echo " --> Stack status after ${n}m: $STACK_STATUS"
     if [[ ( "$STACK_STATUS" == "CREATE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_COMPLETE" ) || ( "$STACK_STATUS" == "DELETE_FAILED" ) ]]; then
       break
     fi
-    sleep 3
+    sleep $SLEEP
   done
 }
 
@@ -87,25 +91,26 @@ function test_endpoint()
 {
   HOSTNAME=$HOST.$DNS_DOMAIN
   PROTOCOL=${PROTOCOL:-https}
-  URL=$PROTOCOL://$HOSTNAME
+  URL_PATH=/users/sign_in
+  URL=$PROTOCOL://${HOSTNAME}${URL_PATH}
   echo " --> Testing for endpoint"
   # Number of requests
   TIMEOUT=30
   # Time to wait between requests
   SLEEP=60
   # Initial HTTP code, should not be 200
-  HTTP_CODE=500
+  HTTP_CODE="500"
   while [ $TIMEOUT -gt 0 -a $HTTP_CODE -ne 200 ]; do
     TIMEOUT=$[$TIMEOUT-1]
-    HTTP_CODE=`curl -o /dev/null --silent --head --write-out '%{http_code}\n' $URL`
-    if [ $HTTP_CODE == 200 ]; then 
+    HTTP_CODE=`curl -o /dev/null -k --silent --head --write-out '%{http_code}' $URL`
+    if [ $HTTP_CODE -eq 200 ]; then 
       break 
     fi
-    #echo " --> GET $URL http_code:$HTTP_CODE ($[TIMEOUT-i] remaining) "
+    echo " --> GET $URL http_code:$HTTP_CODE ($[TIMEOUT-i] remaining) "
     sleep $SLEEP
   done
 
-  if [ $HTTP_CODE == 200 ]; then 
+  if [ $HTTP_CODE -eq 200 ]; then 
     echo " --> Connection to endpoint was successful"
     exit 0
   else
