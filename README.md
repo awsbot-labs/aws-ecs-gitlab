@@ -10,7 +10,7 @@ The scripts to run this CF template require
   * awscli
 
 ## Getting started
-To create the stack in Amazon, copy the environment.variables.example to environement.variables, 
+To create the stack in Amazon, copy the environment.variables.example to environment.variables, thusly
 
 ```
   cp environment.variables.example environment.variables
@@ -26,7 +26,6 @@ fill in the relavent details
   # DNS Domain name which is also used as the Stack name
   export HOST=gitlab
   export DNS_DOMAIN=
-  export STACK_NAME=$HOST-`echo $DNS_DOMAIN | sed -e 's/\./\-/g'`
 
   # DB password and LoadBalancer SSL certificate
   export DB_PASSWORD=
@@ -46,23 +45,29 @@ or simply ```make```.
 ## Known Issues
 
 ### HA vs Backup/restore strategy
-Currently this runs in on an instance in an AutoScaling Group. Although this is good practice for Cloud systems, it could be argued that a simple EC2 instance would suffice.
+Currently this runs on an instance in an AutoScaling Group. Although this is good practice for [the Cloud](http://cloudsarelies.com/), it could be argued that a simple EC2 instance would suffice.
 
 #### Pros:
 * Its highly available, and load-balanced
 
 #### Cons:
-* It requires a complitcated backup/restore strategy
-* Only one instance can be used
+* It requires a complicated backup/restore strategy
+* Only one instance can be used due to the filesystem
 
 ### Nginx and SSL
-Currently the Amazon load-balancer ONLY listens on port 443, proxying the HTTPS requests forwarding to port 80 on the instance. A more user-friendly configuration where Nginx redirects/rewrites (I forget which) requests from HTTP -> HTTPS can be configured. However the SSL cert and key need to be installed on the instance - which is a bit messy from an automation perspective.
+Currently the Amazon load-balancer ONLY listens on port 443, proxying the HTTPS requests to port 80 on the instance. 
+
+A more user-friendly configuration where Nginx redirects/rewrites (I forget which) requests from HTTP -> HTTPS can be configured. However the SSL cert and key need to be installed on the instance - which is a bit messy from an automation perspective.
 
 ## Todos
 * Create a script that backs up the Gitlab database to an s3 bucket ```gitlab-rake gitlab:backup:create | aws s3 cp...``` for example.
 * Investigate Amazon Elastic file system https://aws.amazon.com/efs/ (would solve the AutoScaling argument).
 * Play with Nginx config to get redirects working without messy automation.
+* Find a way to make the create_stack function generic by passing the parameters as an argument.
+* SMTP settings.
 
 ## References
 * https://gitlab.com/gitlab-org/gitlab-ce/blob/master/doc/raketasks/backup_restore.md
+* http://doc.gitlab.com/omnibus/docker/
+* https://hub.docker.com/r/gitlab/gitlab-ce/
 * https://aws.amazon.com/efs/
